@@ -9,13 +9,36 @@ POSTS = [
     {"id": 2, "title": "Second post", "content": "This is the second post."},
 ]
 
-
+# GET endpoint
 @app.route('/api/posts', methods=['GET'])
 def get_posts():
-    return jsonify(POSTS)
+    # Get sorting parameters
+    sort_field = request.args.get('sort', '').lower()
+    direction = request.args.get('direction', 'asc').lower()
+
+    # Validate sort field (if provided)
+    if sort_field and sort_field not in ['title', 'content']:
+        return jsonify({"error": "Invalid sort field. Use 'title' or 'content'"}), 400
+
+    # Validate direction
+    if direction not in ['asc', 'desc']:
+        return jsonify({"error": "Invalid direction. Use 'asc' or 'desc'"}), 400
+
+    # If no sort field specified, return original order
+    if not sort_field:
+        return jsonify(POSTS)
+
+    # Sort the posts
+    sorted_posts = sorted(
+        POSTS,
+        key=lambda post: post[sort_field].lower(),
+        reverse=(direction == 'desc')
+    )
+
+    return jsonify(sorted_posts)
 
 
-# NEU: Add endpoint
+# ADD endpoint
 @app.route('/api/posts', methods=['POST'])
 def add_post():
     # Get JSON data from request
@@ -102,6 +125,33 @@ def update_post(post_id):
 
     # Return the updated post
     return jsonify(post_to_update), 200
+
+
+# SEARCH endpoint
+@app.route('/api/posts/search', methods=['GET'])
+def search_posts():
+    # Get query parameters
+    title_query = request.args.get('title', '').lower()
+    content_query = request.args.get('content', '').lower()
+
+    # If no search parameters provided, return all posts
+    if not title_query and not content_query:
+        return jsonify(POSTS)
+
+    # Filter posts based on search criteria
+    matching_posts = []
+
+    for post in POSTS:
+        # Check if title matches (case-insensitive)
+        if title_query and title_query in post['title'].lower():
+            matching_posts.append(post)
+            continue
+
+        # Check if content matches (case-insensitive)
+        if content_query and content_query in post['content'].lower():
+            matching_posts.append(post)
+
+    return jsonify(matching_posts)
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5002, debug=True)
