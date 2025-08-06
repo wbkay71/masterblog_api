@@ -1,9 +1,25 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_swagger_ui import get_swaggerui_blueprint  # NEU
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
+# Swagger Configuration
+SWAGGER_URL = "/api/docs"
+API_URL = "/static/masterblog.json"
+
+swagger_ui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={
+        'app_name': 'Masterblog API'
+    }
+)
+app.register_blueprint(swagger_ui_blueprint, url_prefix=SWAGGER_URL)
+
+# Initial posts data
 POSTS = [
     {"id": 1, "title": "First post", "content": "This is the first post."},
     {"id": 2, "title": "Second post", "content": "This is the second post."},
@@ -12,6 +28,10 @@ POSTS = [
 # GET endpoint
 @app.route('/api/posts', methods=['GET'])
 def get_posts():
+    # Check if pagination is requested
+    page_param = request.args.get('page')
+    per_page_param = request.args.get('per_page')
+
     # Get sorting parameters
     sort_field = request.args.get('sort', '').lower()
     direction = request.args.get('direction', 'asc').lower()
@@ -24,19 +44,50 @@ def get_posts():
     if direction not in ['asc', 'desc']:
         return jsonify({"error": "Invalid direction. Use 'asc' or 'desc'"}), 400
 
-    # If no sort field specified, return original order
-    if not sort_field:
-        return jsonify(POSTS)
+    # Apply sorting if requested
+    posts_to_return = POSTS.copy()
+    if sort_field:
+        posts_to_return = sorted(
+            posts_to_return,
+            key=lambda post: post[sort_field].lower(),
+            reverse=(direction == 'desc')
+        )
 
-    # Sort the posts
-    sorted_posts = sorted(
-        POSTS,
-        key=lambda post: post[sort_field].lower(),
-        reverse=(direction == 'desc')
-    )
+    # If no pagination params, return simple array (for frontend compatibility)
+    if page_param is None and per_page_param is None:
+        return jsonify(posts_to_return)
 
-    return jsonify(sorted_posts)
+    # Parse pagination parameters
+    try:
+        page = int(page_param) if page_param else 1
+        per_page = int(per_page_param) if per_page_param else 10
+    except ValueError:
+        return jsonify({"error": "Invalid pagination parameters"}), 400
 
+    # Validate pagination parameters
+    if page < 1 or per_page < 1:
+        return jsonify({"error": "Page and per_page must be positive"}), 400
+
+    # Calculate pagination
+    total_posts = len(posts_to_return)
+    start = (page - 1) * per_page
+    end = start + per_page
+
+    # Get paginated posts
+    paginated_posts = posts_to_return[start:end]
+
+    # Return paginated response with metadata
+    return jsonify({
+        'posts': paginated_posts,
+        'pagination': {
+            'total': total_posts,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total_posts + per_page - 1) // per_page,
+            'has_next': end < total_posts,
+            'has_prev': page > 1
+        }
+    })
 
 # ADD endpoint
 @app.route('/api/posts', methods=['POST'])
@@ -60,11 +111,16 @@ def add_post():
     else:
         new_id = 1
 
-    # Create new post
+    # Create new post with extended fields
     new_post = {
         'id': new_id,
         'title': data['title'],
-        'content': data['content']
+        'content': data['content'],
+        'author': data.get('author', 'Anonymous'),  # Optional mit Default
+        'created_at': datetime.now().isoformat(),  # Automatisch
+        'tags': data.get('tags', []),  # Optional, Default: leere Liste
+        'category': data.get('category', 'General'),  # Optional mit Default
+        'likes': 0  # Automatisch 0
     }
 
     # Add to POSTS list
@@ -72,7 +128,6 @@ def add_post():
 
     # Return the new post with status 201
     return jsonify(new_post), 201
-
 
 # DELETE endpoint
 @app.route('/api/posts/<int:post_id>', methods=['DELETE'])
